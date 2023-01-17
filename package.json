@@ -10,7 +10,7 @@
     "type": "git",
     "url": "https://github.com/idevelopthings/surrealdb-client-ts.git"
   },
-  "version": "0.0.0",
+  "version": "0.0.1",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -32,8 +32,7 @@
     },
     "./package.json": "./package.json"
   },
-  "dependencies": {
-  },
+  "dependencies": {},
   "devDependencies": {
     "typescript": "^4.9.3",
     "@rollup/plugin-typescript": "^10.0.1",
