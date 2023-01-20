@@ -1,7 +1,7 @@
 import Emitter from "./emitter";
 
-const OPENED = Symbol("Opened");
-const CLOSED = Symbol("Closed");
+export const OPENED = Symbol("Opened");
+export const CLOSED = Symbol("Closed");
 
 export default class Socket extends Emitter {
 	ws!: WebSocket;
@@ -17,9 +17,33 @@ export default class Socket extends Emitter {
 
 		this.#init();
 
-		this.url = String(url)
-			.replace("http://", "ws://")
-			.replace("https://", "wss://");
+		this.ensureCorrectUrl(url);
+	}
+
+	private ensureCorrectUrl(url: URL | string) {
+		if (!url) {
+			throw new Error("Url is empty or not passed");
+		}
+
+		if (typeof url !== "string") {
+			url = url.toString();
+		}
+
+		// check if url has a valid protocol
+		if (!/^https?:\/\//i.test(url)) {
+			throw new Error("Invalid protocol, expected http or https");
+		}
+
+		url = url.replace("http://", "ws://").replace("https://", "wss://");
+
+		// check if url already ends with '/rpc'
+		if (!/\/rpc$/.test(url)) {
+			// append '/rpc' to the end of the url
+			url += "/rpc";
+		}
+
+
+		this.url = url;
 	}
 
 	ready!: Promise<void>;

@@ -1,16 +1,16 @@
-import Surreal from "../index";
+import {Client} from "../Client";
 import Emitter from "./emitter";
 
 export default class Live extends Emitter {
 	#id: string | undefined;
 
-	#db: Surreal;
+	#db: Client;
 
 	#sql: string;
 
 	#vars?: Record<string, unknown>;
 
-	constructor(db: Surreal, sql: string, vars?: Record<string, unknown>) {
+	constructor(db: Client, sql: string, vars?: Record<string, unknown>) {
 		super();
 
 		this.#db = db;
