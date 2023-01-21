@@ -71,6 +71,20 @@ export type Auth =
 	| ScopeAuth;
 
 
+export interface ClientConfiguration {
+	host: string | URL;
+
+	auth: Auth;
+
+	use: UseConfig;
+}
+
+export type UseConfig = {
+	ns: string;
+	db: string;
+}
+
+
 export type ClientEvents = {
 	"close": OnConnectionEndCb,
 	"open": OnConnectionOpenCb,

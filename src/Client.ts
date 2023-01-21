@@ -4,8 +4,12 @@ import Socket, {OPENED} from "./classes/socket";
 import Pinger from "./classes/pinger";
 import guid from "./utils/guid";
 import Live from "./classes/live";
-import type {Auth, Result, Patch, OnConnectionEndCb, ClientEvents, OnConnectionOpenCb} from "./Types";
+import type {Auth, Result, Patch, OnConnectionEndCb, ClientEvents, OnConnectionOpenCb, UseConfig} from "./Types";
+import {ClientConfiguration} from "./Types";
 import {SigninResult} from "./result/SigninResult";
+import {ConnectionFlowResult, ConnectionFlowStage} from "./result/ConnectionFlowResult";
+import {BaseResult} from "./result/BaseResult";
+import {UseResult} from "./result/UseResult";
 
 let singleton: Client;
 
@@ -41,6 +45,8 @@ export class Client extends Emitter {
 		"open"  : null,
 	};
 
+	public configuration: ClientConfiguration;
+
 	ws!: Socket;
 
 	url?: string;
@@ -67,23 +73,24 @@ export class Client extends Emitter {
 	// Methods
 	// ------------------------------
 
-	/**
-	 * Initializee a SurrealDb.
-	 * @param url - The url of the database endpoint to connect to.
-	 * @param token - The authorization token.
-	 */
-	constructor(url?: string, token?: string) {
-		super();
-
-		this.url = url;
-
-		this.token = token;
-
-		if (url) {
-			this.connect(url);
-		}
+	public configure(config: ClientConfiguration) {
+		this.configuration = config;
 	}
 
+	public isConfigured(checkFullConfiguration: boolean = false) {
+		if (!this.configuration) {
+			return false;
+		}
+
+		if (!this.configuration.host) return false;
+
+		if (checkFullConfiguration) {
+			if (!this.configuration.auth) return false;
+			if (!this.configuration.use) return false;
+		}
+
+		return true;
+	}
 
 	onConnectionEnd(cb: OnConnectionEndCb) {
 		this.events.close = cb;
@@ -102,15 +109,18 @@ export class Client extends Emitter {
 
 	/**
 	 * Connects to a local or remote database endpoint.
-	 * @param url - The url of the database endpoint to connect to.
 	 */
-	connect(url: string): Promise<void> {
+	connect(): Promise<void> {
+		if (!this.isConfigured()) {
+			throw new Error("Client is not configured. Call .configure({...}) with your database configuration.");
+		}
+
 		try {
 			// Next we setup the websocket connection
 			// and listen for events on the socket,
 			// specifying whether logging is enabled.
 
-			this.ws = new Socket(url);
+			this.ws = new Socket(this.configuration.host);
 
 			// Setup the interval pinger so that the
 			// connection is kept alive through
@@ -180,6 +190,76 @@ export class Client extends Emitter {
 	// Public methods
 	// --------------------------------------------------
 
+	async startConnectionFlow(): Promise<ConnectionFlowResult> {
+		if (!this.isConfigured(true)) {
+			throw new Error("Client is not configured. Call .configure({...}) with your database configuration.");
+		}
+
+		const result = new ConnectionFlowResult();
+
+		const onFailure = (data: Error | BaseResult) => {
+			let returnDidFail: boolean = false;
+			if (data instanceof Error) {
+				result.setError(data);
+				returnDidFail = true;
+			}
+
+			if (data instanceof BaseResult && !returnDidFail) {
+				returnDidFail = data.didFail();
+			}
+
+			if (returnDidFail) {
+				if (this.isConnected()) {
+					this.close();
+				}
+			}
+
+			return returnDidFail;
+		};
+
+		try {
+			result.currentStage = ConnectionFlowStage.Connect;
+
+			if (!this.isConnected()) {
+				await this.connect();
+			}
+		} catch (error) {
+			onFailure(error);
+			return result;
+		}
+
+		try {
+			result.currentStage = ConnectionFlowStage.Signin;
+
+			const authResult = await this.signin();
+			result.setAuthResult(authResult);
+
+			if (onFailure(authResult)) {
+				return result;
+			}
+		} catch (error) {
+			onFailure(error);
+			return result;
+		}
+
+		try {
+			result.currentStage = ConnectionFlowStage.Use;
+
+			const useResult = await this.use();
+			result.setUseResult(useResult);
+
+
+			if (onFailure(useResult)) {
+				return result;
+			}
+		} catch (error) {
+			onFailure(error);
+			return result;
+		}
+
+		return result;
+	}
+
 	sync(query: string, vars?: Record<string, unknown>): Live {
 		return new Live(this, query, vars);
 	}
@@ -216,15 +296,21 @@ export class Client extends Emitter {
 
 	/**
 	 * Switch to a specific namespace and database.
-	 * @param ns - Switches to a specific namespace.
-	 * @param db - Switches to a specific database.
 	 */
-	use(ns: string, db: string): Promise<void> {
+	use(useConfig?: UseConfig): Promise<UseResult> {
 		const id = guid();
+		if (!useConfig) {
+			if (!this.configuration?.use) {
+				throw new Error("No use configuration provided and no use configuration found in client configuration.");
+			}
+
+			useConfig = this.configuration.use;
+		}
+
 		return this.ws.ready.then(() => {
 			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#result(res, resolve, reject));
-				this.sendEvent(id, "use", [ns, db]);
+				this.once(id, (res) => this.#use(res, resolve, reject));
+				this.sendEvent(id, "use", [useConfig.ns, useConfig.db]);
 			});
 		});
 	}
@@ -260,15 +346,24 @@ export class Client extends Emitter {
 
 	/**
 	 * Signs in to a specific authentication scope.
-	 * @param vars - Variables used in a signin query.
-	 * @return The authenication token.
+	 * @param authVars - Variables used in a signin query.
+	 * @return The authentication token.
 	 */
-	signin(vars: Auth): Promise<SigninResult> {
+	signin(authVars?: Auth): Promise<SigninResult> {
 		const id = guid();
+
+		if (!authVars) {
+			if (!this.configuration?.auth) {
+				throw new Error("No auth variables provided and no auth variables configured. Please provide auth variables or configure the client with auth variables.");
+			}
+
+			authVars = this.configuration.auth;
+		}
+
 		return this.ws.ready.then(() => {
 			return new Promise((resolve, reject) => {
 				this.once(id, (res) => this.#signin(res, resolve, reject));
-				this.sendEvent(id, "signin", [vars]);
+				this.sendEvent(id, "signin", [authVars]);
 			});
 		});
 	}
@@ -495,7 +590,7 @@ export class Client extends Emitter {
 	public isConnected(): boolean {
 		if (!this.ws) return false;
 
-		return this.ws.status === OPENED;
+		return this.ws.isConnected();
 	}
 
 	// --------------------------------------------------
@@ -540,6 +635,18 @@ export class Client extends Emitter {
 		} else {
 			this.token = res.result;
 			return resolve(SigninResult.successful(res.result));
+		}
+	}
+
+	#use(
+		res: Result<any>,
+		resolve: (value: UseResult) => void,
+		reject: (reason?: any) => void,
+	): void {
+		if (res.error) {
+			return resolve(UseResult.failed(res.error.message));
+		} else {
+			return resolve(UseResult.successful(res.result));
 		}
 	}
 

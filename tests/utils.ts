@@ -1,7 +1,7 @@
 import {exec, type ChildProcess, spawn} from "child_process";
 import {vi, expect} from "vitest";
 import {Client} from "../src/Client";
-import {OnConnectionEndCb, OnConnectionOpenCb} from "../src/Types";
+import {OnConnectionEndCb, OnConnectionOpenCb, Auth, ClientConfiguration} from "../src/Types";
 import {SigninResult} from "../src/result/SigninResult";
 
 
@@ -88,9 +88,11 @@ export type Options = {
 
 	serverProcess?: ServerProcessInstance
 
-	signin?: boolean
+	runSignin?: boolean
+	signin?: Auth
 
-	use?: boolean
+	runUse?: boolean
+	use?: [string, string]
 
 	onConnectionEnd?: OnConnectionEndCb
 	onConnectionOpen?: OnConnectionOpenCb
@@ -103,12 +105,16 @@ export async function createClient(options: Options) {
 		options.serverProcess.start();
 	}
 
-	if (options?.signin === undefined) {
-		options.signin = true;
+	if (options?.runSignin === undefined) {
+		options.runSignin = true;
 	}
 
-	if (options?.use === undefined) {
-		options.use = true;
+	if (options?.runUse === undefined) {
+		options.runUse = true;
+	}
+
+	if (options?.use) {
+		options.use = ["test", "test"];
 	}
 
 	const db = new Client();
@@ -121,24 +127,69 @@ export async function createClient(options: Options) {
 	if (options?.onConnectionEnd)
 		db.onConnectionOpen(options.onConnectionEnd);
 
-	await db.connect("http://127.0.0.1:4269");
+	db.configure({
+		host : "http://127.0.0.1:4269",
+		auth : {
+			user : options.user || "root",
+			pass : options.pass || "secret"
+		},
+		use  : {
+			ns : options?.use ? options.use[0] : "test",
+			db : options?.use ? options.use[1] : "test"
+		}
+	});
+
+	await db.connect();
 
 	expect(db.isConnected()).toBe(true);
 
 	let signinResult: SigninResult = null;
-	if (options.signin)
-		signinResult = await db.signin({
-			user : options.user || "root",
-			pass : options.pass || "secret"
-		});
+	if (options.runSignin)
+		signinResult = await db.signin();
 
-	if (options.use)
-		await db.use("test", "test");
+	if (options.runUse)
+		await db.use();
 
 	return {
 		db,
 		serverProc : options.serverProcess,
 
 		signinResult,
+	};
+}
+
+export function createBaseClient(options?: Partial<ClientConfiguration>, serverProc?: ServerProcessInstance) {
+	if (!serverProc) {
+		serverProc = createServerProcess();
+		serverProc.start();
+	}
+
+	const db = new Client();
+
+	const conf: ClientConfiguration = {
+		host : "http://127.0.0.1:4269",
+		auth : {
+			user : "root",
+			pass : "secret"
+		},
+		use  : {
+			ns : "test",
+			db : "test"
+		}
+	};
+
+	if (options) {
+		for (let key in options) {
+			if (options[key] !== undefined) {
+				conf[key] = options[key];
+			}
+		}
+	}
+
+	db.configure(conf);
+
+	return {
+		db,
+		serverProc,
 	};
 }

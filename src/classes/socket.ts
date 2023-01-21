@@ -129,4 +129,12 @@ export default class Socket extends Emitter {
 		this.closed = true;
 		this.ws.close(code, reason);
 	}
+
+	public isConnected(): boolean {
+		if (this.status === CLOSED) {
+			return false;
+		}
+
+		return this.closed === false;
+	}
 }
