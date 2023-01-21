@@ -3,6 +3,7 @@ import {Client} from "../src/Client";
 import {createServerProcess, createClient, Options, createBaseClient, CreatedClientUtil} from "./utils";
 import {WebSocket} from "ws";
 import {ConnectionFlowStage} from "../src/result/ConnectionFlowResult";
+import {setTimeout as setTimeoutAsync} from "timers/promises";
 
 beforeAll(() => {
 	// @ts-ignore
@@ -156,6 +157,50 @@ describe("ConnectionState", () => {
 		expect(signinResult.status).toBe(false);
 		expect(signinResult.error).not.toBeNull();
 		expect(signinResult.error).toBe("There was a problem with authentication");
+
+	});
+
+	it("should not reconnect automatically, when manually disconnecting", async () => {
+		let loggedAttempts = 0;
+
+		const clientOptions = {
+			reconnectPolicy     : {
+				autoReconnect        : true,
+				maxReconnectInterval : 500,
+				reconnectInterval    : 100,
+				maxReconnectAttempts : 10,
+			},
+			onConnectionOpen    : vi.fn(() => {
+
+			}),
+			onConnectionEnd     : vi.fn(() => {
+				console.log("onEnd");
+			}),
+			onConnectionFailure : vi.fn(() => {
+				console.log("onFailure");
+			}),
+
+			onLostConnection : vi.fn(() => {
+				console.log("onLostConnection");
+			}),
+
+			onReconnected : vi.fn((attempts) => {
+				console.log("onReconnected, attempts = ", attempts);
+			}),
+
+		} satisfies Options;
+
+		const {db, serverProc} = await createClient(clientOptions);
+
+		expect(clientOptions.onConnectionOpen).toBeCalledTimes(1);
+		expect(clientOptions.onConnectionEnd).toBeCalledTimes(0);
+		expect(clientOptions.onConnectionFailure).toBeCalledTimes(0);
+
+		db.close();
+
+		expect(clientOptions.onConnectionEnd).toBeCalledTimes(0);
+
+		return setTimeoutAsync(5000);
 
 	});
 

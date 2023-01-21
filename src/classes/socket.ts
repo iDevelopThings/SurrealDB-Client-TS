@@ -201,6 +201,10 @@ export default class Socket extends Emitter {
 				// Set up new handlers for the end user
 				this.ws.addEventListener("error", (e) => this.emit("error", e));
 				this.ws.addEventListener("close", (e) => {
+					if (this.state === SocketState.CLOSED) {
+						return;
+					}
+
 					this.state = SocketState.CLOSED;
 
 					if (!this.reconnectPolicy.autoReconnect) {
