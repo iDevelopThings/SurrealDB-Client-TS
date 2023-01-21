@@ -168,10 +168,15 @@ export class Client extends Emitter {
 
 			this.ws.on("onLostConnection", () => {
 				this.callCb("lostConnection");
+
+				this.pinger.stop();
+
 			});
 
 			this.ws.on("reconnected", (attempts) => {
 				this.callCb("reconnected", [attempts]);
+
+				this.pinger.stop();
 			});
 
 			// When the connection is closed we
