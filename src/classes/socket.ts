@@ -73,6 +73,11 @@ export default class Socket extends Emitter {
 		this.resolver.handled = true;
 		this.resolver.state   = "rejected";
 
+		if(e instanceof Event) {
+			this.resolver.reject(new Error('Connection failed'));
+			return;
+		}
+
 		this.resolver.reject(e ? new Error(e?.message || e.toString()) : new Error("Connection failed"));
 	}
 
