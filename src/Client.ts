@@ -1,10 +1,10 @@
 import Emitter from "./classes/emitter";
 import {AuthenticationError, PermissionError, RecordError} from "./errors";
-import Socket, {OPENED} from "./classes/socket";
+import Socket from "./classes/socket";
 import Pinger from "./classes/pinger";
 import guid from "./utils/guid";
 import Live from "./classes/live";
-import type {Auth, Result, Patch, OnConnectionEndCb, ClientEvents, OnConnectionOpenCb, UseConfig} from "./Types";
+import type {Auth, Result, Patch, OnConnectionEndCb, ClientEvents, OnConnectionOpenCb, UseConfig, OnConnectionFailureCb} from "./Types";
 import {ClientConfiguration} from "./Types";
 import {SigninResult} from "./result/SigninResult";
 import {ConnectionFlowResult, ConnectionFlowStage} from "./result/ConnectionFlowResult";
@@ -12,6 +12,7 @@ import {BaseResult} from "./result/BaseResult";
 import {UseResult} from "./result/UseResult";
 
 let singleton: Client;
+
 
 
 export class Client extends Emitter {
@@ -43,6 +44,7 @@ export class Client extends Emitter {
 	private events: ClientEvents = {
 		"close" : null,
 		"open"  : null,
+		"connectionFailure" : null
 	};
 
 	public configuration: ClientConfiguration;
@@ -55,7 +57,7 @@ export class Client extends Emitter {
 
 	pinger!: Pinger;
 
-	attempted?: Promise<void>;
+//	attempted?: Promise<void>;
 
 	// ------------------------------
 	// Accessors
@@ -100,6 +102,10 @@ export class Client extends Emitter {
 		this.events.open = cb;
 	}
 
+	onConnectionFailure(cb: OnConnectionFailureCb) {
+		this.events.connectionFailure = cb;
+	}
+
 	private callCb<T extends keyof ClientEvents>(type: T, args?: Parameters<ClientEvents[T]>) {
 		if (this.events[type]) {
 			//@ts-ignore
@@ -110,7 +116,7 @@ export class Client extends Emitter {
 	/**
 	 * Connects to a local or remote database endpoint.
 	 */
-	connect(): Promise<void> {
+	async connect(): Promise<void> {
 		if (!this.isConfigured()) {
 			throw new Error("Client is not configured. Call .configure({...}) with your database configuration.");
 		}
@@ -127,14 +133,6 @@ export class Client extends Emitter {
 			// loadbalancers and proxies.
 
 			this.pinger = new Pinger(30000);
-
-			// When the connection is opened we
-			// need to attempt authentication if
-			// a token has already been applied.
-
-			this.ws.on("open", () => {
-				this.#init();
-			});
 
 			// When the connection is opened we
 			// change the relevant properties
@@ -178,10 +176,10 @@ export class Client extends Emitter {
 			// time. This will automatically
 			// attempt to reconnect on failure.
 
-			this.ws.open();
-
-			return this.wait();
+			await this.ws.open();
 		} catch (e) {
+			this.callCb("connectionFailure", [e]);
+
 			return Promise.reject(e);
 		}
 	}
@@ -265,15 +263,6 @@ export class Client extends Emitter {
 	}
 
 	/**
-	 * Waits for the connection to the database to succeed.
-	 */
-	wait(): Promise<void> {
-		return this.ws.ready.then(() => {
-			return this.attempted!;
-		});
-	}
-
-	/**
 	 * Closes the persistent connection to the database.
 	 */
 	close(): void {
@@ -287,10 +276,8 @@ export class Client extends Emitter {
 	 */
 	ping(): Promise<void> {
 		const id = guid();
-		return this.ws.ready.then(() => {
-			return new Promise(() => {
-				this.sendEvent(id, "ping");
-			});
+		return new Promise(() => {
+			this.sendEvent(id, "ping");
 		});
 	}
 
@@ -307,11 +294,9 @@ export class Client extends Emitter {
 			useConfig = this.configuration.use;
 		}
 
-		return this.ws.ready.then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#use(res, resolve, reject));
-				this.sendEvent(id, "use", [useConfig.ns, useConfig.db]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(id, (res) => this.#use(res, resolve, reject));
+			this.sendEvent(id, "use", [useConfig.ns, useConfig.db]);
 		});
 	}
 
@@ -321,11 +306,9 @@ export class Client extends Emitter {
 	 */
 	info(): Promise<void> {
 		const id = guid();
-		return this.ws.ready.then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#result(res, resolve, reject));
-				this.sendEvent(id, "info");
-			});
+		return new Promise((resolve, reject) => {
+			this.once(id, (res) => this.#result(res, resolve, reject));
+			this.sendEvent(id, "info");
 		});
 	}
 
@@ -336,11 +319,9 @@ export class Client extends Emitter {
 	 */
 	signup(vars: Auth): Promise<string> {
 		const id = guid();
-		return this.ws.ready.then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#signup(res, resolve, reject));
-				this.sendEvent(id, "signup", [vars]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(id, (res) => this.#signup(res, resolve, reject));
+			this.sendEvent(id, "signup", [vars]);
 		});
 	}
 
@@ -360,11 +341,9 @@ export class Client extends Emitter {
 			authVars = this.configuration.auth;
 		}
 
-		return this.ws.ready.then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#signin(res, resolve, reject));
-				this.sendEvent(id, "signin", [authVars]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(id, (res) => this.#signin(res, resolve, reject));
+			this.sendEvent(id, "signin", [authVars]);
 		});
 	}
 
@@ -373,11 +352,9 @@ export class Client extends Emitter {
 	 */
 	invalidate(): Promise<void> {
 		const id = guid();
-		return this.ws.ready.then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#auth(res, resolve, reject));
-				this.sendEvent(id, "invalidate");
-			});
+		return new Promise((resolve, reject) => {
+			this.once(id, (res) => this.#auth(res, resolve, reject));
+			this.sendEvent(id, "invalidate");
 		});
 	}
 
@@ -387,23 +364,19 @@ export class Client extends Emitter {
 	 */
 	authenticate(token: string): Promise<void> {
 		const id = guid();
-		return this.ws.ready.then(() => {
-			return new Promise<unknown>((resolve, reject) => {
-				this.once(id, (res) => this.#auth(res, resolve, reject));
-				this.sendEvent(id, "authenticate", [token]);
-			}) as Promise<void>;
-		});
+		return new Promise<unknown>((resolve, reject) => {
+			this.once(id, (res) => this.#auth(res, resolve, reject));
+			this.sendEvent(id, "authenticate", [token]);
+		}) as Promise<void>;
 	}
 
 	// --------------------------------------------------
 
 	live(table: string): Promise<string> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#result(res, resolve, reject));
-				this.sendEvent(id, "live", [table]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(id, (res) => this.#result(res, resolve, reject));
+			this.sendEvent(id, "live", [table]);
 		});
 	}
 
@@ -413,11 +386,9 @@ export class Client extends Emitter {
 	 */
 	kill(query: string): Promise<void> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#result(res, resolve, reject));
-				this.sendEvent(id, "kill", [query]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(id, (res) => this.#result(res, resolve, reject));
+			this.sendEvent(id, "kill", [query]);
 		});
 	}
 
@@ -428,11 +399,9 @@ export class Client extends Emitter {
 	 */
 	let(key: string, val: unknown): Promise<string> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(id, (res) => this.#result(res, resolve, reject));
-				this.sendEvent(id, "let", [key, val]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(id, (res) => this.#result(res, resolve, reject));
+			this.sendEvent(id, "let", [key, val]);
 		});
 	}
 
@@ -446,14 +415,12 @@ export class Client extends Emitter {
 		vars?: Record<string, unknown>,
 	): Promise<T> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise<T>((resolve, reject) => {
-				this.once(
-					id,
-					(res) => this.#result(res, resolve as () => void, reject),
-				);
-				this.sendEvent(id, "query", [query, vars]);
-			});
+		return new Promise<T>((resolve, reject) => {
+			this.once(
+				id,
+				(res) => this.#result(res, resolve as () => void, reject),
+			);
+			this.sendEvent(id, "query", [query, vars]);
 		});
 	}
 
@@ -463,15 +430,13 @@ export class Client extends Emitter {
 	 */
 	select<T>(thing: string): Promise<T[]> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(
-					id,
-					(res) =>
-						this.#output(res, "select", thing, resolve, reject),
-				);
-				this.sendEvent(id, "select", [thing]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(
+				id,
+				(res) =>
+					this.#output(res, "select", thing, resolve, reject),
+			);
+			this.sendEvent(id, "select", [thing]);
 		});
 	}
 
@@ -485,15 +450,13 @@ export class Client extends Emitter {
 		data?: T,
 	): Promise<T & { id: string }> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(
-					id,
-					(res) =>
-						this.#output(res, "create", thing, resolve, reject),
-				);
-				this.sendEvent(id, "create", [thing, data]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(
+				id,
+				(res) =>
+					this.#output(res, "create", thing, resolve, reject),
+			);
+			this.sendEvent(id, "create", [thing, data]);
 		});
 	}
 
@@ -509,15 +472,13 @@ export class Client extends Emitter {
 		data?: T,
 	): Promise<T & { id: string }> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(
-					id,
-					(res) =>
-						this.#output(res, "update", thing, resolve, reject),
-				);
-				this.sendEvent(id, "update", [thing, data]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(
+				id,
+				(res) =>
+					this.#output(res, "update", thing, resolve, reject),
+			);
+			this.sendEvent(id, "update", [thing, data]);
 		});
 	}
 
@@ -536,15 +497,13 @@ export class Client extends Emitter {
 		data?: Partial<T> & U,
 	): Promise<(T & U & { id: string }) | (T & U & { id: string })[]> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(
-					id,
-					(res) =>
-						this.#output(res, "change", thing, resolve, reject),
-				);
-				this.sendEvent(id, "change", [thing, data]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(
+				id,
+				(res) =>
+					this.#output(res, "change", thing, resolve, reject),
+			);
+			this.sendEvent(id, "change", [thing, data]);
 		});
 	}
 
@@ -557,15 +516,13 @@ export class Client extends Emitter {
 	 */
 	modify(thing: string, data?: Patch[]): Promise<Patch[]> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(
-					id,
-					(res) =>
-						this.#output(res, "modify", thing, resolve, reject),
-				);
-				this.sendEvent(id, "modify", [thing, data]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(
+				id,
+				(res) =>
+					this.#output(res, "modify", thing, resolve, reject),
+			);
+			this.sendEvent(id, "modify", [thing, data]);
 		});
 	}
 
@@ -575,15 +532,13 @@ export class Client extends Emitter {
 	 */
 	delete(thing: string): Promise<void> {
 		const id = guid();
-		return this.wait().then(() => {
-			return new Promise((resolve, reject) => {
-				this.once(
-					id,
-					(res) =>
-						this.#output(res, "delete", thing, resolve, reject),
-				);
-				this.sendEvent(id, "delete", [thing]);
-			});
+		return new Promise((resolve, reject) => {
+			this.once(
+				id,
+				(res) =>
+					this.#output(res, "delete", thing, resolve, reject),
+			);
+			this.sendEvent(id, "delete", [thing]);
 		});
 	}
 
@@ -597,13 +552,13 @@ export class Client extends Emitter {
 	// Private methods
 	// --------------------------------------------------
 
-	#init(): void {
+	/*#init(): void {
 		this.attempted = new Promise((res) => {
 			this.token
 				? this.authenticate(this.token).then(res).catch(res)
 				: res();
 		});
-	}
+	}*/
 
 	sendEvent(id: string, method: string, params: unknown[] = []): void {
 		this.ws.send(JSON.stringify({

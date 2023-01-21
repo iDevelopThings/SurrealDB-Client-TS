@@ -3,6 +3,21 @@ import Emitter from "./emitter";
 export const OPENED = Symbol("Opened");
 export const CLOSED = Symbol("Closed");
 
+
+async function createWebsocketClient(url: string): Promise<WebSocket> {
+	if (typeof WebSocket !== "undefined") {
+		return new WebSocket(url);
+	}
+
+
+	const result = await import("ws");
+
+	return new result.default(url, {
+		handshakeTimeout : 2000,
+	}) as any as WebSocket;
+
+}
+
 export default class Socket extends Emitter {
 	ws!: WebSocket;
 
@@ -12,10 +27,15 @@ export default class Socket extends Emitter {
 
 	status = CLOSED;
 
+	private resolver: {
+		state: "pending" | "resolved" | "rejected",
+		handled: boolean,
+		resolve: (value: any) => void,
+		reject: (e: Error) => void
+	};
+
 	constructor(url: URL | string) {
 		super();
-
-		this.#init();
 
 		this.ensureCorrectUrl(url);
 	}
@@ -46,78 +66,68 @@ export default class Socket extends Emitter {
 		this.url = url;
 	}
 
-	ready!: Promise<void>;
-	private resolve!: () => void;
+	private connectionFailed(e) {
+		if (this.resolver?.handled) {
+			return;
+		}
+		this.resolver.handled = true;
+		this.resolver.state   = "rejected";
 
-	#init(): void {
-		this.ready = new Promise((resolve) => {
-			this.resolve = resolve;
-		});
+		this.resolver.reject(e ? new Error(e?.message || e.toString()) : new Error("Connection failed"));
 	}
 
-	open(): void {
-		this.ws = new WebSocket(this.url);
+	open() {
+		return new Promise<any>(async (resolve, reject) => {
 
-		// Setup event listeners so that the
-		// Surreal instance can listen to the
-		// necessary event types.
+			this.resolver = {
+				state   : "pending",
+				handled : false,
+				resolve,
+				reject
+			};
 
-		this.ws.addEventListener("message", (e) => {
-			this.emit("message", e);
-		});
-
-		this.ws.addEventListener("error", (e) => {
-			this.emit("error", e);
-		});
-
-		this.ws.addEventListener("close", (e) => {
-			this.emit("close", e);
-		});
-
-		this.ws.addEventListener("open", (e) => {
-			this.emit("open", e);
-		});
-
-		// If the WebSocket connection with the
-		// database was disconnected, then we need
-		// to reset the ready promise.
-
-		this.ws.addEventListener("close", () => {
-			if (this.status === OPENED) {
-				this.#init();
+			if (this.ws) {
+				this.ws.close();
+				this.ws = null;
 			}
-		});
 
-		// When the WebSocket is opened or closed
-		// then we need to store the connection
-		// status within the status property.
+			this.ws = await createWebsocketClient(this.url);
 
-		this.ws.addEventListener("close", () => {
-			this.status = CLOSED;
-		});
+			// Setup initial error/close handlers for the connection stage
+			this.ws.addEventListener("error", this.connectionFailed.bind(this));
+			this.ws.addEventListener("close", this.connectionFailed.bind(this));
 
-		this.ws.addEventListener("open", () => {
-			this.status = OPENED;
-		});
+			this.ws.addEventListener("message", (e) => this.emit("message", e));
 
-		// If the connection is closed, then we
-		// need to attempt to reconnect on a
-		// regular basis until we are successful.
+			this.ws.addEventListener("open", (e) => {
+				this.status = OPENED;
 
-		this.ws.addEventListener("close", () => {
-			if (this.closed === false) {
-				setTimeout(() => {
-					this.open();
-				}, 2500);
-			}
-		});
+				// If we successfully connect, remove those initial handlers
+				this.ws.removeEventListener("error", this.connectionFailed.bind(this));
+				this.ws.removeEventListener("close", this.connectionFailed.bind(this));
 
-		// When the WebSocket successfully opens
-		// then let's resolve the ready promise so
-		// that promise based code can continue.
+				// Set up new handlers for the end user
+				this.ws.addEventListener("error", (e) => this.emit("error", e));
+				this.ws.addEventListener("close", (e) => {
+					this.emit("close", e);
 
-		this.ws.addEventListener("open", () => {
-			this.resolve();
+//					if (this.status === OPENED) {
+//						this.#init();
+//					}
+
+					this.status = CLOSED;
+
+					if (this.closed === false) {
+						setTimeout(() => {
+							this.open();
+						}, 2500);
+					}
+				});
+
+				this.emit("open", e);
+
+				this.resolver.resolve(this);
+			});
 		});
 	}
 

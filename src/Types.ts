@@ -88,6 +88,7 @@ export type UseConfig = {
 export type ClientEvents = {
 	"close": OnConnectionEndCb,
 	"open": OnConnectionOpenCb,
+	"connectionFailure": OnConnectionFailureCb,
 }
 
 /**
@@ -95,4 +96,5 @@ export type ClientEvents = {
  */
 
 export type OnConnectionEndCb = () => void;
+export type OnConnectionFailureCb = (error: Error) => void;
 export type OnConnectionOpenCb = () => void;
