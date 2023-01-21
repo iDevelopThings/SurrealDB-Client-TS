@@ -1,7 +1,7 @@
 import {exec, type ChildProcess, spawn} from "child_process";
 import {vi, expect} from "vitest";
 import {Client} from "../src/Client";
-import {OnConnectionEndCb, OnConnectionOpenCb, Auth, ClientConfiguration, OnConnectionFailureCb} from "../src/Types";
+import {OnConnectionEndCb, OnConnectionOpenCb, Auth, ClientConfiguration, OnConnectionFailureCb, OnLostConnectionCb, OnReconnectAttemptCb, OnReconnectedCb, ReconnectPolicy} from "../src/Types";
 import {SigninResult} from "../src/result/SigninResult";
 
 
@@ -70,7 +70,7 @@ export function createServerProcess(): ServerProcessInstance {
 		}
 		return new Promise((resolve) => {
 			serverProc.on("exit", () => {
-				setTimeout(() => resolve(true), 500);
+				setTimeout(() => resolve(true), 1500);
 			});
 
 			serverProc.kill();
@@ -109,6 +109,12 @@ export type Options = {
 	onConnectionEnd?: OnConnectionEndCb
 	onConnectionFailure?: OnConnectionFailureCb
 	onConnectionOpen?: OnConnectionOpenCb
+
+	onLostConnection?: OnLostConnectionCb,
+	onReconnectAttempt?: OnReconnectAttemptCb,
+	onReconnected?: OnReconnectedCb,
+
+	reconnectPolicy?: ReconnectPolicy
 }
 
 export interface CreatedClientUtil {
@@ -149,6 +155,15 @@ export async function createClient(options: Options) {
 	if (options?.onConnectionFailure)
 		db.onConnectionFailure(options.onConnectionFailure);
 
+	if (options?.onLostConnection)
+		db.onLostConnection(options.onLostConnection);
+
+	if (options?.onReconnectAttempt)
+		db.onReconnectAttempt(options.onReconnectAttempt);
+
+	if (options?.onReconnected)
+		db.onReconnected(options.onReconnected);
+
 	db.configure({
 		host : "http://127.0.0.1:4269",
 		auth : {
@@ -160,6 +175,10 @@ export async function createClient(options: Options) {
 			db : options?.use ? options.use[1] : "test"
 		}
 	});
+
+	if (options?.reconnectPolicy) {
+		db.setReconnectPolicy(options.reconnectPolicy);
+	}
 
 	await db.connect();
 

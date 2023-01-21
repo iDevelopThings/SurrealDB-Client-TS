@@ -4,8 +4,8 @@ import Socket from "./classes/socket";
 import Pinger from "./classes/pinger";
 import guid from "./utils/guid";
 import Live from "./classes/live";
-import type {Auth, Result, Patch, OnConnectionEndCb, ClientEvents, OnConnectionOpenCb, UseConfig, OnConnectionFailureCb} from "./Types";
-import {ClientConfiguration} from "./Types";
+import type {Auth, Result, Patch, OnConnectionEndCb, ClientEvents, OnConnectionOpenCb, UseConfig, OnConnectionFailureCb, OnLostConnectionCb, OnReconnectAttemptCb, OnReconnectedCb} from "./Types";
+import {ClientConfiguration, ReconnectPolicy} from "./Types";
 import {SigninResult} from "./result/SigninResult";
 import {ConnectionFlowResult, ConnectionFlowStage} from "./result/ConnectionFlowResult";
 import {BaseResult} from "./result/BaseResult";
@@ -42,10 +42,15 @@ export class Client extends Emitter {
 	// ------------------------------
 
 	private events: ClientEvents = {
-		"close" : null,
-		"open"  : null,
-		"connectionFailure" : null
+		"close"             : null,
+		"open"              : null,
+		"connectionFailure" : null,
+		"lostConnection"    : null,
+		"reconnectAttempt"  : null,
+		"reconnected"       : null,
 	};
+
+	public reconnectPolicy: ReconnectPolicy;
 
 	public configuration: ClientConfiguration;
 
@@ -74,6 +79,10 @@ export class Client extends Emitter {
 	// ------------------------------
 	// Methods
 	// ------------------------------
+
+	public setReconnectPolicy(config: ReconnectPolicy) {
+		this.reconnectPolicy = config;
+	}
 
 	public configure(config: ClientConfiguration) {
 		this.configuration = config;
@@ -106,6 +115,18 @@ export class Client extends Emitter {
 		this.events.connectionFailure = cb;
 	}
 
+	onLostConnection(cb: OnLostConnectionCb) {
+		this.events.lostConnection = cb;
+	}
+
+	onReconnectAttempt(cb: OnReconnectAttemptCb) {
+		this.events.reconnectAttempt = cb;
+	}
+
+	onReconnected(cb: OnReconnectedCb) {
+		this.events.reconnected = cb;
+	}
+
 	private callCb<T extends keyof ClientEvents>(type: T, args?: Parameters<ClientEvents[T]>) {
 		if (this.events[type]) {
 			//@ts-ignore
@@ -126,7 +147,7 @@ export class Client extends Emitter {
 			// and listen for events on the socket,
 			// specifying whether logging is enabled.
 
-			this.ws = new Socket(this.configuration.host);
+			this.ws = new Socket(this.configuration.host, this.reconnectPolicy, this.events.reconnectAttempt);
 
 			// Setup the interval pinger so that the
 			// connection is kept alive through
@@ -143,6 +164,14 @@ export class Client extends Emitter {
 				this.pinger.start(() => {
 					this.ping();
 				});
+			});
+
+			this.ws.on("onLostConnection", () => {
+				this.callCb("lostConnection");
+			});
+
+			this.ws.on("reconnected", (attempts) => {
+				this.callCb("reconnected", [attempts]);
 			});
 
 			// When the connection is closed we

@@ -79,6 +79,16 @@ export interface ClientConfiguration {
 	use: UseConfig;
 }
 
+export interface ReconnectPolicy {
+	autoReconnect: boolean;
+
+	maxReconnectAttempts?: number;
+
+	reconnectInterval?: number;
+
+	maxReconnectInterval?: number;
+}
+
 export type UseConfig = {
 	ns: string;
 	db: string;
@@ -88,6 +98,9 @@ export type UseConfig = {
 export type ClientEvents = {
 	"close": OnConnectionEndCb,
 	"open": OnConnectionOpenCb,
+	"lostConnection": OnLostConnectionCb,
+	"reconnectAttempt": OnReconnectAttemptCb,
+	"reconnected": OnReconnectedCb,
 	"connectionFailure": OnConnectionFailureCb,
 }
 
@@ -98,3 +111,7 @@ export type ClientEvents = {
 export type OnConnectionEndCb = () => void;
 export type OnConnectionFailureCb = (error: Error) => void;
 export type OnConnectionOpenCb = () => void;
+
+export type OnLostConnectionCb = () => void;
+export type OnReconnectAttemptCb = (attempts: number) => boolean;
+export type OnReconnectedCb = (attempts: number) => void;

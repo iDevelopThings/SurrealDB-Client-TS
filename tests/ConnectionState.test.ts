@@ -71,6 +71,79 @@ describe("ConnectionState", () => {
 		expect(e.message).toBe("connect ECONNREFUSED 127.0.0.1:4269");
 	});
 
+	it("should handle reconnecting on dropped connection", async () => {
+		let loggedAttempts = 0;
+
+		const clientOptions = {
+			reconnectPolicy     : {
+				autoReconnect        : true,
+				maxReconnectInterval : 500,
+				reconnectInterval    : 100,
+				maxReconnectAttempts : 10,
+			},
+			onConnectionOpen    : vi.fn(() => {
+
+			}),
+			onConnectionEnd     : vi.fn(() => {
+				console.log("onEnd");
+			}),
+			onConnectionFailure : vi.fn(() => {
+				console.log("onFailure");
+			}),
+
+			onLostConnection : vi.fn(() => {
+				console.log("onLostConnection");
+			}),
+
+			onReconnectAttempt : vi.fn((attempts) => {
+				console.log("onReconnectAttempt, attempts = ", attempts);
+				loggedAttempts = attempts;
+
+				if (attempts === 5) {
+					serverProc.start();
+				}
+
+				return true;
+			}),
+
+			onReconnected : vi.fn((attempts) => {
+				console.log("onReconnected, attempts = ", attempts);
+			}),
+
+
+		} satisfies Options;
+
+
+		const {db, serverProc} = await createClient(clientOptions);
+
+		expect(clientOptions.onConnectionOpen).toBeCalledTimes(1);
+		expect(clientOptions.onConnectionEnd).toBeCalledTimes(0);
+		expect(clientOptions.onConnectionFailure).toBeCalledTimes(0);
+
+		await serverProc.stop();
+
+		expect(clientOptions.onLostConnection).toBeCalledTimes(1);
+
+		await new Promise((resolve, reject) => {
+			const waitForReconnect = async () => {
+
+				if (db.isConnected()) {
+					resolve(true);
+					return;
+				}
+
+				setTimeout(waitForReconnect, 500);
+			};
+
+			setTimeout(waitForReconnect, 500);
+
+		});
+
+		expect(clientOptions.onReconnectAttempt).toBeCalled();
+		expect(clientOptions.onReconnected).toBeCalledTimes(1);
+
+	});
+
 	it("should handle failed authentication correctly", async () => {
 		const clientOptions = {
 			user : "wrong",

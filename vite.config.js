@@ -4,7 +4,7 @@ export default defineConfig({
 	plugins : [],
 	test    : {
 		globals     : true,
-		testTimeout : 20000,
+		testTimeout : 60000,
 	},
 	
 	build : {
